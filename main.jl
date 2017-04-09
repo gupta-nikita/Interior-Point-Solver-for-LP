@@ -1,3 +1,68 @@
+
+using MatrixDepot
+
+type IplpSolution
+  x::Vector{Float64} # the solution vector 
+  flag::Bool         # a true/false flag indicating convergence or not
+  cs::Vector{Float64} # the objective vector in standard form
+  As::SparseMatrixCSC{Float64} # the constraint matrix in standard form
+  bs::Vector{Float64} # the right hand side (b) in standard form
+  xs::Vector{Float64} # the solution in standard form
+  lam::Vector{Float64} # the solution lambda in standard form
+  s::Vector{Float64} # the solution s in standard form
+end
+
+
+type IplpProblem
+  c::Vector{Float64}
+  A::SparseMatrixCSC{Float64} 
+  b::Vector{Float64}
+  lo::Vector{Float64}
+  hi::Vector{Float64}
+end
+
+
+
+type IplpProblemStandardForm
+  c::Vector{Float64}
+  A::SparseMatrixCSC{Float64}
+  b::Vector{Float64}
+end
+
+
+# This gives the LP problem
+function convert_matrixdepot(mmmeta::Dict{AbstractString,Any})
+  key_base = sort(collect(keys(mmmeta)))[1]
+  return IplpProblem(
+    vec(mmmeta[key_base*"_c"]),
+    mmmeta[key_base],
+    vec(mmmeta[key_base*"_b"]),    
+    vec(mmmeta[key_base*"_lo"]),    
+    vec(mmmeta[key_base*"_hi"]))
+end
+
+#Convert Problem into Standard Form
+
+function convert_to_standard_form(Problem)
+  n = length(Problem.c)
+  c_dash = vec([Problem.c;-1*Problem.c ; vec(zeros(2*n,1))])
+
+  A = Problem.A
+  m = size(A,1)
+  b = Problem.b
+  hi = Problem.hi
+  lo = Problem.lo
+  @show size(A)
+  A_dash = [A -1*A zeros(m,n) zeros(m,n); 
+            eye(n) 1*eye(n) -1*eye(n) zeros(n,n); 
+            eye(n) -1*eye(n) zeros(n,n) eye(n)]
+  b_dash = [b ; hi ; lo ]
+  return IplpProblemStandardForm(
+          vec(c_dash),
+          sparse(A_dash),
+          b_dash)
+end
+
 # Parameters
 max_iter = 10
 eta = 1
@@ -223,4 +288,8 @@ function main()
   predictor_corrector(AS, cs, b, x_0, s_0, lambda_0)
 end
 
-main()
+# This is the public interface for the problem
+function iplp(Problem, tol; maxit=100)
+
+
+end
