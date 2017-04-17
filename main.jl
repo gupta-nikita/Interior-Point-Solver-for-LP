@@ -184,6 +184,9 @@ function take_step(x_k,s_k,lambda_k,alpha_primal_k,alpha_dual_k,corrector_p_k)
     return x_k,s_k,lambda_k
 end
 
+function get_D2(X_k, S_k)
+  return inv(S_k)*X_k
+end
 function predictor_corrector(A, c, b, x_0, s_0, lambda_0)
     # initialize variables
     k = 0
@@ -195,6 +198,7 @@ function predictor_corrector(A, c, b, x_0, s_0, lambda_0)
     while k <= max_iter
         X_k = get_X(x_k)
         S_k = get_S(s_k)
+        D2 = get_D2(X_k,S_k)
         J = get_jacobian(X_k,S_k, A)
         rc_k = get_rc(A,lambda_k,s_k,c)
         rb_k = get_rb(A,x_k,b)
