@@ -2,7 +2,7 @@
 using MatrixDepot
 
 type IplpSolution
-  x::Vector{Float64} # the solution vector 
+  x::Vector{Float64} # the solution vector
   flag::Bool         # a true/false flag indicating convergence or not
   cs::Vector{Float64} # the objective vector in standard form
   As::SparseMatrixCSC{Float64} # the constraint matrix in standard form
@@ -15,7 +15,7 @@ end
 
 type IplpProblem
   c::Vector{Float64}
-  A::SparseMatrixCSC{Float64} 
+  A::SparseMatrixCSC{Float64}
   b::Vector{Float64}
   lo::Vector{Float64}
   hi::Vector{Float64}
@@ -36,8 +36,8 @@ function convert_matrixdepot(mmmeta::Dict{AbstractString,Any})
   return IplpProblem(
     vec(mmmeta[key_base*"_c"]),
     mmmeta[key_base],
-    vec(mmmeta[key_base*"_b"]),    
-    vec(mmmeta[key_base*"_lo"]),    
+    vec(mmmeta[key_base*"_b"]),
+    vec(mmmeta[key_base*"_lo"]),
     vec(mmmeta[key_base*"_hi"]))
 end
 
@@ -53,10 +53,11 @@ function convert_to_standard_form(Problem)
   hi = Problem.hi
   lo = Problem.lo
   @show size(A)
-  A_dash = [A -1*A zeros(m,n) zeros(m,n); 
-            eye(n) 1*eye(n) -1*eye(n) zeros(n,n); 
+  A_dash = [A -1*A zeros(m,n) zeros(m,n);
+            eye(n) 1*eye(n) -1*eye(n) zeros(n,n);
             eye(n) -1*eye(n) zeros(n,n) eye(n)]
   b_dash = [b ; hi ; lo ]
+
   return IplpProblemStandardForm(
           vec(c_dash),
           sparse(A_dash),
@@ -238,6 +239,17 @@ function predictor_corrector(A, c, b, x_0, s_0, lambda_0)
 
         k += 1
     end
+end
+
+function solve_linear_systems(A, S, X, rc, rb, rxs)
+
+  D = S^(-1/2) * X^(1/2)
+  Z = A*(D^2)*A'
+  delta_lambda = Z / (-1*rb - A*X*S^(-1)*rc + AS^(-1)*rxs)
+  delta_s = -rc - A' * delta_lambda
+  delta_x = -S^(-1)*rxs - X*S(-1)*delta_s
+  return delta_lambda, delta_s, delta_x
+
 end
 
 function get_starting_point(A, b, c)
