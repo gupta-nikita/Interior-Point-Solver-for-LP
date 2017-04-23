@@ -67,6 +67,28 @@ function convert_to_standard_form(Problem)
           b_dash)
 end
 
+function convert_to_standard_form_v2(Problem)
+  n = length(Problem.c)
+
+  c_dash = vec([Problem.c; vec(zeros(n,1))])
+
+  A = Problem.A
+  m = size(A,1)
+  b = Problem.b
+  hi = Problem.hi
+  lo = Problem.lo
+
+  A_dash = [A zeros(m,n);
+            eye(n) eye(n)]
+
+  b_dash = vec([b - A*lo; hi - lo])
+
+  return IplpProblemStandardForm(
+          c_dash,
+          sparse(A_dash),
+          b_dash)
+end
+
 # Parameters
 max_iter = 100
 eta = 1
@@ -336,7 +358,7 @@ function iplp(Problem, tol; maxit=100)
 
   @show sol_original
 
-  standard_P = convert_to_standard_form(Problem) 
+  standard_P = convert_to_standard_form_v2(Problem) 
   
   sol_standard = linprog(standard_P.c,standard_P.A,'=',standard_P.b,ClpSolver())
 
