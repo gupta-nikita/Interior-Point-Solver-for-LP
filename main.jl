@@ -1,5 +1,7 @@
 
 using MatrixDepot
+using MathProgBase
+using Clp
 include("modCholesky.jl")
 
 type IplpSolution
@@ -55,9 +57,9 @@ function convert_to_standard_form(Problem)
   lo = Problem.lo
 
   A_dash = [A -1*A zeros(m,n) zeros(m,n);
-            eye(n) 1*eye(n) -1*eye(n) zeros(n,n);
+            eye(n) -1*eye(n) -1*eye(n) zeros(n,n);
             eye(n) -1*eye(n) zeros(n,n) eye(n)]
-  b_dash = [b ; hi ; lo ]
+  b_dash = [b ; lo ; hi ]
 
   return IplpProblemStandardForm(
           vec(c_dash),
@@ -329,8 +331,14 @@ end
 
 # This is the public interface for the problem
 function iplp(Problem, tol; maxit=100)
+  # Solve using original problem
+  sol_original = linprog(Problem.c,Problem.A,'=',Problem.b,Problem.lo,Problem.hi,ClpSolver())
 
+  @show sol_original
 
+  standard_P = convert_to_standard_form(Problem) 
+  
+  sol_standard = linprog(standard_P.c,standard_P.A,'=',standard_P.b,ClpSolver())
+
+  @show sol_standard
 end
-
-main()
