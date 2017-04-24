@@ -4,6 +4,10 @@ using MathProgBase
 using Clp
 include("modCholesky.jl")
 
+# to detect unbounded variables
+INFINITY = 1.0e308
+
+
 type IplpSolution
   x::Vector{Float64} # the solution vector
   flag::Bool         # a true/false flag indicating convergence or not
@@ -89,6 +93,44 @@ function convert_to_standard_form_v2(Problem)
           b_dash)
 end
 
+function convert_to_standard_form_v3(Problem)
+  n = length(Problem.c)
+
+  A = Problem.A
+  m = size(A,1)
+  b = Problem.b
+  hi = Problem.hi
+  lo = Problem.lo
+
+  As = sparse(A)
+  bs = b
+  cs = Problem.c
+  if length(find(lo)) != 0
+      b = b - A*lo
+      hi = hi - lo
+      bs = b
+      As = sparse(A)
+  end
+
+  if length(find(hi .!= INFINITY)) != 0
+      Jhigh = find(hi .!= INFINITY); 
+      Vhigh = hi[Jhigh];
+      jh = length(Jhigh);
+      B1 = zeros(m,jh);
+      B2 = eye(jh);
+      B3 = zeros(jh,n); 
+      B3[:,Jhigh] = B2;
+      As = [A B1;B3 B2];
+      As = sparse(As);
+      cs = vec([c; zeros(jh,1)]);
+      bs = vec([b;Vhigh]);
+  end
+
+  return IplpProblemStandardForm(
+          cs,
+          As,
+          bs)
+end
 # Parameters
 max_iter = 100
 eta = 1
@@ -358,7 +400,7 @@ function iplp(Problem, tol; maxit=100)
 
   @show sol_original
 
-  standard_P = convert_to_standard_form_v2(Problem) 
+  standard_P = convert_to_standard_form_v3(Problem) 
   
   sol_standard = linprog(standard_P.c,standard_P.A,'=',standard_P.b,ClpSolver())
 
