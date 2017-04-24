@@ -1,5 +1,7 @@
-
+using AMD
 using MatrixDepot
+using MathProgBase
+using Clp
 include("modCholesky.jl")
 
 type IplpSolution
@@ -46,7 +48,7 @@ end
 
 function convert_to_standard_form(Problem)
   n = length(Problem.c)
-  c_dash = vec([Problem.c;-1*Problem.c ; vec(zeros(2*n,1))])
+  c_dash = [Problem.c;-1*Problem.c ; zeros(2*n,1)]
 
   A = Problem.A
   m = size(A,1)
@@ -55,9 +57,9 @@ function convert_to_standard_form(Problem)
   lo = Problem.lo
 
   A_dash = [A -1*A zeros(m,n) zeros(m,n);
-            eye(n) 1*eye(n) -1*eye(n) zeros(n,n);
+            eye(n) -1*eye(n) -1*eye(n) zeros(n,n);
             eye(n) -1*eye(n) zeros(n,n) eye(n)]
-  b_dash = [b ; hi ; lo ]
+  b_dash = [b ; lo ; hi ]
 
   return IplpProblemStandardForm(
           vec(c_dash),
@@ -66,9 +68,8 @@ function convert_to_standard_form(Problem)
 end
 
 # Parameters
-max_iter = 100
-eta = 1
-
+max_iter = 10
+eta = 0.99999
 
 function get_X(x_k)
     return diagm(vec(x_k))
@@ -124,6 +125,7 @@ function get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
 
     return alpha_aff_prim,alpha_aff_dual
 end
+
 
 function get_mu(x_k,s_k)
     n = size(x_k,1)
@@ -189,17 +191,20 @@ function take_step(x_k,s_k,lambda_k,alpha_primal_k,alpha_dual_k,delta_x, delta_s
 end
 
 function get_D2(X_k, S_k)
-  return inv(S_k)*X_k
+  return S_k\X_k
 end
 
 function get_cholesky_factor(A, X_k, S_k)
   D2 = get_D2(X_k, S_k)
   M = A*D2*A'
-  L = modchol(M)
+  ordering = amd(sparse(M))
+  @show(ordering)
+
+  L = modchol(M[ordering, ordering])
   if issparse(L)
     L = full(L)
   end
-  return L
+  return L, ordering
 end
 
 function predictor_corrector(A, c, b, x_0, s_0,lambda_0)
@@ -208,7 +213,6 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0)
     x_k = copy(x_0)
     s_k = copy(s_0)
     lambda_k = copy(lambda_0)
-
 
     while k <= max_iter
         X_k = get_X(x_k)
@@ -224,8 +228,8 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0)
         #predictor_p_k = J\predictor_right
 
         # step length for affine step
-        L = get_cholesky_factor(A, X_k, S_k)
-        delta_lambda_aff, delta_s_aff, delta_x_aff = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k)
+        L, ordering = get_cholesky_factor(A, X_k, S_k)
+        delta_lambda_aff, delta_s_aff, delta_x_aff = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k, ordering)
         alpha_aff_prim,alpha_aff_dual = get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
 
         # Current Duality measure
@@ -244,7 +248,7 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0)
 
         #get step length
         #L = get_cholesky_factor(A, X_k, S_k)
-        delta_lambda, delta_s, delta_x = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k)
+        delta_lambda, delta_s, delta_x = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k, ordering)
 
 
         # max step length
@@ -260,17 +264,20 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0)
         println("Iteration: ", k)
         @show(x_k)
         @show(s_k)
+        @show(c'*x_k)
         #@show(x_k's_k)
 
         k += 1
     end
 end
 
-function solve_linear_systems(L,A, X_k, S_k, rc, rb, rxs)
+function solve_linear_systems(L,A, X_k, S_k, rc, rb, rxs, ordering)
 
   D2 = get_D2(X_k, S_k)
-  lam_rhs = -rb - A*(D2'*rc + inv(S_k)*rxs)
-  delta_lambda = inv(L*L') * lam_rhs
+  #@show(size(D2), size(rb), size(rc), size(A), size(inv(S_k)), size(rxs))
+  lam_rhs = -rb - A*(X_k*inv(S_k)*rc + inv(S_k)*rxs)
+
+  delta_lambda = L'\(L\lam_rhs[ordering])
 
   delta_s = -rc - A' * delta_lambda
   delta_x = -S_k^(-1)*rxs - X_k*inv(S_k)*delta_s
@@ -284,8 +291,8 @@ function get_starting_point(A, b, c)
   #x_hat, lambda_hat, s_hat arre solutions of :
   # min 0.5*x'x subject to Ax=b
   # min 0.5*s's subject to A'lambda + s = c
-  x_hat = A'*inv(A*A')*b
-  lambda_hat = inv(A*A')*A*c
+  x_hat = A'*inv(full((A*A')))*b
+  lambda_hat = A*A'\A*c
   s_hat = c - A'*lambda_hat
 
   delta_x = max(-(3.0/2.0)*minimum(x_hat), 0)
@@ -312,7 +319,7 @@ function main()
         1 0]
   b = [2.0; 7; 3]
 
-  AS = [A1 eye(3)]   #problem with slack
+  AS = sparse([A1 eye(3)])   #problem with slack
   cs = [-1 -2 0 0 0]'
   m,n = size(AS)
 
@@ -325,12 +332,50 @@ function main()
   println("Optimized Initialization")
   x_0, lambda_0, s_0 = get_starting_point(AS, b, cs)
   predictor_corrector(AS, cs, b, x_0, s_0,lambda_0)
+
 end
 
 # This is the public interface for the problem
 function iplp(Problem, tol; maxit=100)
+  # Solve using original problem
+  sol_original = linprog(Problem.c,Problem.A,'=',Problem.b,Problem.lo,Problem.hi,ClpSolver())
+  print(rank(full(Problem.A)))
+  #@show(size(Problem.c), size(Problem.A), size(Problem.b), size(Problem.lo), size(Problem.hi))
+  #@show sol_original
 
+  #standard_P = convert_to_standard_form(Problem)
+  #standard_P = convert_to_standard_form(Problem)
+  #sol_standard = linprog(standard_P.c,standard_P.A,'=',standard_P.b,ClpSolver())
+  #@show(size(standard_P.c), size(standard_P.A), size(standard_P.b))
+  x_0, lambda_0, s_0 = get_starting_point(Problem.A, Problem.b, Problem.c)
+  predictor_corrector(Problem.A, Problem.c, Problem.b,x_0, s_0,lambda_0)
 
+  #@show sol_standard
 end
 
-main()
+function convert_to_standard_form_v2(Problem)
+  n = length(Problem.c)
+
+  c_dash = vec([Problem.c; vec(zeros(n,1))])
+
+  A = Problem.A
+  m = size(A,1)
+  b = Problem.b
+  hi = Problem.hi'
+  lo = Problem.lo'
+  c = Problem.c'
+
+  A_dash = [A zeros(m,n);
+            eye(n) eye(n)]
+
+  b_dash = vec([b - A*lo; hi - lo])
+
+  return IplpProblemStandardForm(
+          c_dash,
+          sparse(A_dash),
+          b_dash)
+end
+
+P = convert_matrixdepot(matrixdepot("LPnetlib/lp_afiro", :read, meta = true))
+iplp(P, 1.0e-7)
+#main()

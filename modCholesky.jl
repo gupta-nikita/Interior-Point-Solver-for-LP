@@ -1,7 +1,7 @@
-eta = 0.0000001 #betweeen 0 to 1
+eta = 1.0e-24#betweeen 0 to 1
 
-
-function modchol(M, eta=0.0000001)
+function modchol(M, eta=1.0e-24)
+  print(rank(M))
   #Check for square matrix
   m,n = size(M)
   if m!=n
@@ -15,10 +15,11 @@ function modchol(M, eta=0.0000001)
   M_prev = M
   L = sparse(zeros((m,n)))
   beta = maximum(diag(M))   #beta = max_i(1,...,m)M_ii
+  print(beta)
 
   for i = 1:m
     if diag(M_prev)[i] <= beta*eta
-      print("Skipping")
+      @show(diag(M_prev)[i], beta*eta)
       #skip this elimination step
       E_curr = get_E_for_modchol(M_prev, i)
       M_curr = M_prev - E_curr
@@ -41,7 +42,6 @@ function modchol(M, eta=0.0000001)
     #@show(i,M_prev, M_curr, L)
     M_prev = M_curr
   end
-  @show(L)
   return L
 end
 
@@ -61,4 +61,3 @@ end
 
 #modchol(M)
 #get_E_for_modchol(M, index)
-
