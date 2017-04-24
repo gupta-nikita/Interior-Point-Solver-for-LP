@@ -9,11 +9,11 @@ function modchol(M, eta=0.0000001)
   end
 
   #Making Matrix sparse matrix
-  M = sparse(M)
+  #M = sparse(M)
 
   #initialization
   M_prev = M
-  L = sparse(zeros((m,n)))
+  L = sparse(zeros((n,n)))
   beta = maximum(diag(M))   #beta = max_i(1,...,m)M_ii
 
   for i = 1:m

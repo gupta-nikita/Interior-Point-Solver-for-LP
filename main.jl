@@ -390,19 +390,20 @@ function main()
 
   println("Optimized Initialization")
   x_0, lambda_0, s_0 = get_starting_point(AS, b, cs)
+  @show x_0
+  @show lambda_0
+  @show s_0
   predictor_corrector(AS, cs, b, x_0, s_0,lambda_0)
 end
 
 # This is the public interface for the problem
 function iplp(Problem, tol; maxit=100)
-  # Solve using original problem
-  sol_original = linprog(Problem.c,Problem.A,'=',Problem.b,Problem.lo,Problem.hi,ClpSolver())
-
-  @show sol_original
-
+  # Convert to standard form
   standard_P = convert_to_standard_form_v3(Problem) 
   
-  sol_standard = linprog(standard_P.c,standard_P.A,'=',standard_P.b,ClpSolver())
-
-  @show sol_standard
+  # get initial points
+  x_0, lambda_0, s_0 = get_starting_point(standard_P.A, standard_P.b, standard_P.c)
+  @show x_0
+  @show lambda_0
+  @show s_0
 end
