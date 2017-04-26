@@ -2,7 +2,7 @@ using AMD
 using MatrixDepot
 using MathProgBase
 using Clp
-include("modCholesky.jl")
+#include("modCholesky.jl")
 
 # to detect unbounded variables
 INFINITY = 1.0e308
@@ -113,12 +113,12 @@ function convert_to_standard_form_v3(Problem)
   end
 
   if length(find(hi .!= INFINITY)) != 0
-      Jhigh = find(hi .!= INFINITY); 
+      Jhigh = find(hi .!= INFINITY);
       Vhigh = hi[Jhigh];
       jh = length(Jhigh);
       B1 = zeros(m,jh);
       B2 = eye(jh);
-      B3 = zeros(jh,n); 
+      B3 = zeros(jh,n);
       B3[:,Jhigh] = B2;
       As = [A B1;B3 B2];
       As = sparse(As);
@@ -132,7 +132,7 @@ function convert_to_standard_form_v3(Problem)
           bs)
 end
 # Parameters
-max_iter = 300
+max_iter = 100
 eta = 0.99999
 
 function get_min_for_negative_delta(v_k, delta_v)
@@ -153,14 +153,6 @@ function get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
     alpha_aff_dual = min(1,get_min_for_negative_delta(s_k,delta_s_aff))
 
     return alpha_aff_prim,alpha_aff_dual
-end
-
-function get_corrector_newton_step_rhs(rc_k,rb_k,X_k,S_k,sigma,mu,delta_x_aff, delta_s_aff)
-    n = size(X_k,1)
-    delta_X_aff = diagm(vec(delta_x_aff))
-    delta_S_aff = diagm(vec(delta_s_aff))
-
-    return -rc_k, -rb_k, (-1*X_k*S_k*ones(n,1) - delta_X_aff*delta_S_aff*ones(n,1) + sigma*mu*ones(n,1))
 end
 
 function get_alpha_max(x_k,s_k,delta_x, delta_s)
@@ -203,7 +195,7 @@ function get_cholesky_factor_v2(A,D2)
   M = M[ordering,ordering]
   n = size(M,1)
   diagM = diag(M)
-  
+
   # Get the maximum diagonal element
   gamma = maximum(abs(diagM))
   # get the maximum off diagonal element
@@ -222,7 +214,7 @@ function get_cholesky_factor_v2(A,D2)
     if !isempty(K)
       for s = 1:j-1
         C[j,j]= C[j,j]- D[s,1]*L[j,s]*L[j,s]
-      end 
+      end
     end
 
     if j < n
@@ -231,7 +223,7 @@ function get_cholesky_factor_v2(A,D2)
         if !isempty(K)
           for s = 1:j-1
             C[i,j] = C[i,j] - D[s,1]*L[i,s]*L[j,s]
-          end 
+          end
         end
       end
 
@@ -239,7 +231,7 @@ function get_cholesky_factor_v2(A,D2)
       theta = maximum(abs(C[j+1:n,j]))
 
       D[j,1] = maximum([abs(C[j,j]) (theta/beta)^2 delta])
-      
+
       for i = j+1:n
         L[i,j] = C[i,j]/D[j,1]
       end
@@ -257,7 +249,7 @@ function get_cholesky_factor_v2(A,D2)
 
 end
 
-function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Problem)
+function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Problem, tol, max_iter)
     # Get system parameters
     n = size(A,2)
     m = size(A,1)
@@ -268,68 +260,50 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
     s_k = copy(s_0)
     lambda_k = copy(lambda_0)
 
+    normalized_residual_den = norm([b;c])
+
     while k <= max_iter
-        X_k = diagm(vec(x_k))
-        S_k = diagm(vec(s_k))
-        D2 = S_k\X_k
+        dxs = x_k./s_k
+        ss = 1./s_k
         rc_k = A'*lambda_k + s_k - c
         rb_k = A*x_k - b
-
-        # rc_k, rb_k,rxs_k = get_predcitor_newton_step_rhs(rc_k,rb_k,X_k,S_k)
-
-        rxs_k = -1*X_k*S_k*ones(n,1)
-        # step length for affine step
-        L, ordering = get_cholesky_factor_v2(A, D2)
-        delta_lambda_aff, delta_s_aff, delta_x_aff = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k, ordering)
-        alpha_aff_prim,alpha_aff_dual = get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
+        rxs_k = x_k.*s_k
 
         # Current Duality measure
-        mu = (x_k'*s_k/n)[1]
-        
+        mu = (x_k.*s_k/n)[1]
+
+        normalized_residual = norm([rc_k;rb_k;rxs_k])/normalized_residual_den
+
+        if (mu <= tol && normalized_residual <= tol)
+          break
+        end
+
+        # step length for affine step
+        L, ordering = get_cholesky_factor_v2(A, sparse(diagm(vec(dxs))))
+        delta_lambda_aff, delta_s_aff, delta_x_aff = solve_linear_systems(L,A,dxs,ss,rc_k, rb_k, rxs_k, ordering)
+        alpha_aff_prim,alpha_aff_dual = get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
+
         # Duality measure for affine step
-        mu_aff = (((x_k + alpha_aff_prim*delta_x_aff)'*(s_k + alpha_aff_dual*delta_s_aff))/n)[1]
-        
+        mu_aff = (((x_k + alpha_aff_prim*delta_x_aff).*(s_k + alpha_aff_dual*delta_s_aff))/n)[1]
+
         # Set the Centering Parameter
-        
+
         sigma = (mu_aff/mu)^3
+        rxs_k = rxs_k + delta_x_aff.*delta_s_aff - sigma*mu
 
-        # CORRECTOR STEP
+        delta_lambda, delta_s, delta_x = solve_linear_systems(L,A,dxs, ss, rc_k, rb_k, rxs_k, ordering)
 
-        rc_k, rb_k, rxs_k = get_corrector_newton_step_rhs(rc_k,rb_k,X_k,S_k,sigma,mu,delta_x_aff, delta_s_aff)
-
-        #get step length
-        #L = get_cholesky_factor(A, X_k, S_k)
-        delta_lambda, delta_s, delta_x = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k, ordering)
-
-        # @show delta_lambda
-        # @show delta_s
-        # @show delta_x
-
-        # max step length
         alpha_max_prim,alpha_max_dual = get_alpha_max(x_k,s_k,delta_x, delta_s)
 
-
-        # Select Eta
-
         eta = max(0.995,1 - mu)
-        # Final Step length for primal and dual variables
-
         alpha_primal_k = min(1,eta*alpha_max_prim)
         alpha_dual_k = min(1,eta*alpha_max_dual)
-        # @show alpha_primal_k
-        # @show alpha_dual_k
-        # Take a step in the final search direction
+
         x_k = x_k + alpha_primal_k*delta_x
         s_k = s_k + alpha_dual_k*delta_s
         lambda_k = lambda_k + alpha_dual_k*delta_lambda
-        
-        println("Iteration: \n", k)
-        
-        # @show(x_k)
-        # @show(s_k)
-        # @show(c'*x_k)
-        #@show(x_k's_k)
 
+        println("Iteration: \n", k)
         println((c[1:n_original])'*(Problem.lo + x_k[1:n_original]),"\n")
         k += 1
     end
@@ -337,16 +311,15 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
     return x_k, s_k, lambda_k
 end
 
-function solve_linear_systems(L,A, X_k, S_k, rc, rb, rxs, ordering)
+function solve_linear_systems(L,A,dxs,ss, rc, rb, rxs, ordering)
 
-  D2 = get_D2(X_k, S_k)
-  #@show(size(D2), size(rb), size(rc), size(A), size(inv(S_k)), size(rxs))
-  lam_rhs = -rb - A*(X_k*inv(S_k)*rc + inv(S_k)*rxs)
+  lam_rhs = -rb - A*(dxs.*rc - ss.*rxs)
 
-  delta_lambda = L'\(L\lam_rhs[ordering])
+  delta_lambda = lam_rhs
+  delta_lambda[ordering] = L'\(L\lam_rhs[ordering])
 
   delta_s = -rc - A' * delta_lambda
-  delta_x = -1*inv(S_k)*rxs - X_k*inv(S_k)*delta_s
+  delta_x = -ss.*rxs - dxs.*delta_s
 
   return delta_lambda, delta_s, delta_x
 
@@ -386,5 +359,8 @@ function iplp(Problem, tol; maxit=100)
 
   standard_P = convert_to_standard_form_v3(Problem)
   x_0, lambda_0, s_0 = get_starting_point(standard_P.A,standard_P.b,standard_P.c)
-  x_sol, s_sol, lambda_sol = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem)
+  x_sol, s_sol, lambda_sol = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem, tol, maxit)
 end
+
+P = convert_matrixdepot(matrixdepot("LPnetlib/lp_afiro", :read, meta = true))
+iplp(P, 1.0e-7)
