@@ -6,7 +6,7 @@ include("modCholesky.jl")
 
 # to detect unbounded variables
 INFINITY = 1.0e308
-
+machine_eps = 1.1102230246251565e-16
 
 type IplpSolution
   x::Vector{Float64} # the solution vector
@@ -132,7 +132,7 @@ function convert_to_standard_form_v3(Problem)
           bs)
 end
 # Parameters
-max_iter = 100
+max_iter = 300
 eta = 0.99999
 
 function get_min_for_negative_delta(v_k, delta_v)
@@ -181,7 +181,11 @@ end
 
 
 function get_cholesky_factor(A, D2)
-  M = A*D2*A'
+  M = A*D2*(A')
+  @show isdiag(D2)
+  @show issymmetric(M)
+  # @show isposdef(M)
+
   ordering = amd(sparse(M))
   # @show(ordering)
 
@@ -190,6 +194,67 @@ function get_cholesky_factor(A, D2)
     L = full(L)
   end
   return L, ordering
+end
+
+function get_cholesky_factor_v2(A,D2)
+  M = A*D2*A'
+  ordering = amd(sparse(M))
+
+  M = M[ordering,ordering]
+  n = size(M,1)
+  diagM = diag(M)
+  
+  # Get the maximum diagonal element
+  gamma = maximum(abs(diagM))
+  # get the maximum off diagonal element
+  xi = maximum(abs(M - diagm(diagM)))
+  delta = machine_eps*(maximum([gamma + xi 1]))
+
+  beta = sqrt(maximum([gamma xi/n machine_eps]))
+
+  D = zeros(n,1)
+  L = sparse(eye(n))
+  C = zeros(n,n)
+
+  for j = 1:n
+    K = 1:j-1
+    C[j,j] = M[j,j]
+    if !isempty(K)
+      for s = 1:j-1
+        C[j,j]= C[j,j]- D[s,1]*L[j,s]*L[j,s]
+      end 
+    end
+
+    if j < n
+      for i = j+1:n
+          C[i,j] = M[i,j]
+        if !isempty(K)
+          for s = 1:j-1
+            C[i,j] = C[i,j] - D[s,1]*L[i,s]*L[j,s]
+          end 
+        end
+      end
+
+      # I can calculate D[j,j] now
+      theta = maximum(abs(C[j+1:n,j]))
+
+      D[j,1] = maximum([abs(C[j,j]) (theta/beta)^2 delta])
+      
+      for i = j+1:n
+        L[i,j] = C[i,j]/D[j,1]
+      end
+    else
+      D[j] = maximum([abs(C[j,j]) delta]);
+    end
+  end
+
+  # Convert to the standard form of Cholesky Factorization
+  for j = 1:n
+    L[:,j] = L[:,j]*sqrt(D[j,1])
+  end
+
+  return L,ordering
+
 end
 
 function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Problem)
@@ -214,7 +279,7 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
 
         rxs_k = -1*X_k*S_k*ones(n,1)
         # step length for affine step
-        L, ordering = get_cholesky_factor(A, D2)
+        L, ordering = get_cholesky_factor_v2(A, D2)
         delta_lambda_aff, delta_s_aff, delta_x_aff = solve_linear_systems(L,A, X_k, S_k, rc_k, rb_k, rxs_k, ordering)
         alpha_aff_prim,alpha_aff_dual = get_alpha_affine(x_k,s_k,delta_x_aff, delta_s_aff)
 
