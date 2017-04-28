@@ -466,3 +466,19 @@ function iplp(Problem, tol; maxit=100000)
   solution = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem, tol, maxit)
   return solution
 end
+
+function unboundedness_check(A,c,x_k,s_k)
+  X_k = diagm([x_k;s_k])
+  X = A*(X_k^2)*A'
+  L = get_cholesky(X)
+  p_k = L*L'\(A*(X_k^2)*c)
+  r_k = c - A'*p_k
+
+  if -(X_k^2)*r_k >=0
+    return true
+  return false
+end
+
+P = convert_matrixdepot(matrixdepot("LPnetlib/lp_agg", :read, meta = true))
+solution = iplp(P, 1.0e-6)
+@show(solution)
