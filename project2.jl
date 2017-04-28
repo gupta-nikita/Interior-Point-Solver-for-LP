@@ -300,7 +300,7 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
 
         @show(mu, normalized_residual)
         if (mu <= tol && normalized_residual <= tol)
-          convergence = false
+          convergence = true
           break
         end
 
@@ -352,7 +352,6 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
       vec(lambda_k),
       vec(s_k)
     )
-    #return x_k, s_k, lambda_k
 end
 
 function plot_graph(iter_hist, func_val_hist, mu_hist, norm_res_hist)
@@ -445,6 +444,8 @@ function remove_zero_rows(Problem)
     Problem.lo,
     Problem.hi
   )
+
+end
 
 end
 # This is the public interface for the problem
