@@ -420,8 +420,39 @@ function get_starting_point(A, b, c)
   return x_0, lambda_0, s_0
 end
 
+function remove_zero_rows(Problem)
+  m = size(Problem.A,1)
+  non_zero_elems = find(Problem.A)
+
+  n_non_zero = length(non_zero_elems)
+
+  non_zero_rows = zeros(m,1)
+  for i = 1:n_non_zero
+    index = non_zero_elems[i] % m
+    @show index
+    if index == 0
+      index = m
+    end
+    non_zero_rows[index] = 1
+  end
+
+  ind = find(non_zero_rows)
+  @show ind
+  return IplpProblem(
+    Problem.c,
+    sparse(Problem.A[ind,:]),
+    vec(Problem.b[ind,:]),
+    Problem.lo,
+    Problem.hi
+  )
+
+end
 # This is the public interface for the problem
 function iplp(Problem, tol; maxit=100000)
+
+  @show size(Problem.A)
+  Problem = remove_zero_rows(Problem)
+  @show size(Problem.A)
   m_original = size(Problem.A,1)
   n_original = size(Problem.A,2)
 
@@ -434,7 +465,3 @@ function iplp(Problem, tol; maxit=100000)
   solution = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem, tol, maxit)
   return solution
 end
-
-P = convert_matrixdepot(matrixdepot("LPnetlib/lp_bnl1", :read, meta = true))
-solution = iplp(P, 1.0e-6)
-@show(solution)
