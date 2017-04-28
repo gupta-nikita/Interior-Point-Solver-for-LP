@@ -2,7 +2,7 @@ using AMD
 using MatrixDepot
 using MathProgBase
 using Clp
-#include("modCholesky.jl")
+using PyPlot
 
 # to detect unbounded variables
 INFINITY = 1.0e308
@@ -49,56 +49,13 @@ function convert_matrixdepot(mmmeta::Dict{AbstractString,Any})
 end
 
 #Convert Problem into Standard Form
-
 function convert_to_standard_form(Problem)
   n = length(Problem.c)
-  c_dash = [Problem.c;-1*Problem.c ; zeros(2*n,1)]
 
   A = Problem.A
   m = size(A,1)
   b = Problem.b
-  hi = Problem.hi
-  lo = Problem.lo
-
-  A_dash = [A -1*A zeros(m,n) zeros(m,n);
-            eye(n) -1*eye(n) -1*eye(n) zeros(n,n);
-            eye(n) -1*eye(n) zeros(n,n) eye(n)]
-  b_dash = [b ; lo ; hi ]
-
-  return IplpProblemStandardForm(
-          vec(c_dash),
-          sparse(A_dash),
-          b_dash)
-end
-
-function convert_to_standard_form_v2(Problem)
-  n = length(Problem.c)
-
-  c_dash = vec([Problem.c; vec(zeros(n,1))])
-
-  A = Problem.A
-  m = size(A,1)
-  b = Problem.b
-  hi = Problem.hi
-  lo = Problem.lo
-
-  A_dash = [A zeros(m,n);
-            eye(n) eye(n)]
-
-  b_dash = vec([b - A*lo; hi - lo])
-
-  return IplpProblemStandardForm(
-          c_dash,
-          sparse(A_dash),
-          b_dash)
-end
-
-function convert_to_standard_form_v3(Problem)
-  n = length(Problem.c)
-
-  A = Problem.A
-  m = size(A,1)
-  b = Problem.b
+  c = Problem.c
   hi = Problem.hi
   lo = Problem.lo
 
@@ -131,8 +88,8 @@ function convert_to_standard_form_v3(Problem)
           As,
           bs)
 end
+
 # Parameters
-max_iter = 100
 eta = 0.99999
 
 function get_min_for_negative_delta(v_k, delta_v)
@@ -249,6 +206,67 @@ function get_cholesky_factor_v2(A,D2)
 
 end
 
+
+function get_cholesky(M)
+  ordering = amd(sparse(M))
+
+  M = M[ordering,ordering]
+  n = size(M,1)
+  diagM = diag(M)
+
+  # Get the maximum diagonal element
+  gamma = maximum(abs(diagM))
+  # get the maximum off diagonal element
+  xi = maximum(abs(M - diagm(diagM)))
+  delta = machine_eps*(maximum([gamma + xi 1]))
+
+  beta = sqrt(maximum([gamma xi/n machine_eps]))
+
+  D = zeros(n,1)
+  L = sparse(eye(n))
+  C = zeros(n,n)
+
+  for j = 1:n
+    K = 1:j-1
+    C[j,j] = M[j,j]
+    if !isempty(K)
+      for s = 1:j-1
+        C[j,j]= C[j,j]- D[s,1]*L[j,s]*L[j,s]
+      end
+    end
+
+    if j < n
+      for i = j+1:n
+          C[i,j] = M[i,j]
+        if !isempty(K)
+          for s = 1:j-1
+            C[i,j] = C[i,j] - D[s,1]*L[i,s]*L[j,s]
+          end
+        end
+      end
+
+      # I can calculate D[j,j] now
+      theta = maximum(abs(C[j+1:n,j]))
+
+      D[j,1] = maximum([abs(C[j,j]) (theta/beta)^2 delta])
+
+      for i = j+1:n
+        L[i,j] = C[i,j]/D[j,1]
+      end
+    else
+      D[j] = maximum([abs(C[j,j]) delta]);
+    end
+  end
+
+  # Convert to the standard form of Cholesky Factorization
+  for j = 1:n
+    L[:,j] = L[:,j]*sqrt(D[j,1])
+  end
+
+  return L
+
+end
+
 function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Problem, tol, max_iter)
     # Get system parameters
     n = size(A,2)
@@ -261,6 +279,12 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
     lambda_k = copy(lambda_0)
 
     normalized_residual_den = norm([b;c])
+    convergence = false
+
+    iter_hist = []
+    func_val_hist = []
+    mu_hist = []
+    norm_res_hist = []
 
     while k <= max_iter
         dxs = x_k./s_k
@@ -274,7 +298,9 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
 
         normalized_residual = norm([rc_k;rb_k;rxs_k])/normalized_residual_den
 
+        @show(mu, normalized_residual)
         if (mu <= tol && normalized_residual <= tol)
+          convergence = false
           break
         end
 
@@ -305,10 +331,50 @@ function predictor_corrector(A, c, b, x_0, s_0,lambda_0,m_original,n_original,Pr
 
         println("Iteration: \n", k)
         println((c[1:n_original])'*(Problem.lo + x_k[1:n_original]),"\n")
+        iter_hist = [iter_hist;k]
+        func_val_hist = [func_val_hist;(c[1:n_original])'*(Problem.lo + x_k[1:n_original])]
+        mu_hist = [mu_hist;mu]
+        norm_res_hist = [norm_res_hist; normalized_residual]
         k += 1
     end
 
-    return x_k, s_k, lambda_k
+    plot_graph(iter_hist, func_val_hist, mu_hist, norm_res_hist)
+
+    #@show(eltype(x_k[1:n_original] + Problem.lo), size(convergence), size(c), size(A), size(b),size(x_k), size(lambda_k), size(s_k))
+
+    return IplpSolution(
+      vec(x_k[1:n_original] + Problem.lo),
+      Bool(convergence),
+      vec(c),
+      sparse(A),
+      vec(b),
+      vec(x_k),
+      vec(lambda_k),
+      vec(s_k)
+    )
+    #return x_k, s_k, lambda_k
+end
+
+function plot_graph(iter_hist, func_val_hist, mu_hist, norm_res_hist)
+  suptitle("LPnetlib/lp_afiro")
+  subplot(311)
+  #suptitle("Iteration vs function value")
+  xlabel("Iterations")
+  ylabel("function value")
+  plot(iter_hist, func_val_hist)
+
+  subplot(312)
+  #suptitle("Iteration vs mu value")
+  xlabel("Iterations")
+  ylabel("mu value")
+  plot(iter_hist,mu_hist)
+
+  subplot(313)
+  #suptitle("Iteration vs normalised residual value")
+  xlabel("Iterations")
+  ylabel("norm residual value")
+  plot(iter_hist, norm_res_hist)
+
 end
 
 function solve_linear_systems(L,A,dxs,ss, rc, rb, rxs, ordering)
@@ -330,8 +396,11 @@ function get_starting_point(A, b, c)
   #x_hat, lambda_hat, s_hat arre solutions of :
   # min 0.5*x'x subject to Ax=b
   # min 0.5*s's subject to A'lambda + s = c
-  x_hat = A'*inv(full((A*A')))*b
-  lambda_hat = A*A'\A*c
+  L = get_cholesky(A*A')
+  AA = L*L'
+  d = AA\b
+  x_hat = A'*d
+  lambda_hat = AA\(A*c)
   s_hat = c - A'*lambda_hat
 
   delta_x = max(-(3.0/2.0)*minimum(x_hat), 0)
@@ -348,19 +417,24 @@ function get_starting_point(A, b, c)
   lambda_0 = lambda_hat
   s_0 = s_hat + delta_s*ones(n,1)
 
-  #@show(x_0, lambda_0, s_0)
   return x_0, lambda_0, s_0
 end
 
 # This is the public interface for the problem
-function iplp(Problem, tol; maxit=100)
+function iplp(Problem, tol; maxit=100000)
   m_original = size(Problem.A,1)
   n_original = size(Problem.A,2)
 
-  standard_P = convert_to_standard_form_v3(Problem)
+  sol_original = linprog(Problem.c,Problem.A,'=',Problem.b,Problem.lo,Problem.hi,ClpSolver())
+  @show(sol_original)
+
+  standard_P = convert_to_standard_form(Problem)
+  #@show(full(standard_P.A), standard_P.b, standard_P.c)
   x_0, lambda_0, s_0 = get_starting_point(standard_P.A,standard_P.b,standard_P.c)
-  x_sol, s_sol, lambda_sol = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem, tol, maxit)
+  solution = predictor_corrector(standard_P.A, standard_P.c, standard_P.b,x_0, s_0,lambda_0,m_original,n_original,Problem, tol, maxit)
+  return solution
 end
 
-P = convert_matrixdepot(matrixdepot("LPnetlib/lp_afiro", :read, meta = true))
-iplp(P, 1.0e-7)
+P = convert_matrixdepot(matrixdepot("LPnetlib/lp_bnl1", :read, meta = true))
+solution = iplp(P, 1.0e-6)
+@show(solution)
